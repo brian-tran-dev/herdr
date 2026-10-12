@@ -317,6 +317,8 @@ Set `tab_bar_position = "bottom"` under `[ui]` to place the desktop tab row belo
 
 On the `khoa/customize` client, desktop tabs display their one-based position and name as `1: tab name`, or `1: tab name [Z]` when zoomed. Selected tabs use the same text with the existing highlight styling. Each label retains one space of outer padding. These are display decorations only; tab names, public IDs and session state remain unchanged. The right-hand native zoom badge is padded as ` ZOOM `, including both spaces in its highlighted background.
 
+The expanded sidebar also shows shortcut badges. Workspace names use `[1] name` through `[9] name`, then `[x] name`, following the current workspace shortcut order within each machine, including worktree grouping. Agent entries show the same badges once at the start of their first line, following the agent shortcut order across online machines and the selected sort/filter. Later agent-detail lines and the collapsed sidebar are unchanged. Cached offline agents use `[x]` and do not consume a numbered shortcut. Scrolling does not restart numbering; grouping, sorting, creation and removal update the display positions without changing names, public IDs or session data. `[x]` means there is no 1–9 shortcut, not a delete action.
+
 Configure an ordered tmux-style status area at the right edge of the tab row:
 
 ```toml

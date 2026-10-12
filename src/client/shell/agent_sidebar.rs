@@ -80,9 +80,9 @@ pub(super) fn render_agent_panel(
         agent_scroll,
         hits,
         |row| row.rows.len(),
-        |buffer, rect, row, hits| {
+        |buffer, rect, index, row, hits| {
             hits.agents.push((rect, row.pane_id.clone()));
-            render_agent_row(buffer, rect, row, config);
+            render_agent_row(buffer, rect, row, Some(index), config);
         },
     );
 }
@@ -160,7 +160,7 @@ pub(super) fn render_agent_list<T>(
     agent_scroll: &mut usize,
     hits: &mut ShellHitMap,
     row_lines: impl Fn(&T) -> usize,
-    mut render_row: impl FnMut(&mut Buffer, Rect, &T, &mut ShellHitMap),
+    mut render_row: impl FnMut(&mut Buffer, Rect, usize, &T, &mut ShellHitMap),
 ) {
     let body = Rect::new(
         area.x,
@@ -217,7 +217,7 @@ pub(super) fn render_agent_list<T>(
             break;
         }
         let rect = Rect::new(body.x, y, content_width, height);
-        render_row(buffer, rect, row, hits);
+        render_row(buffer, rect, index, row, hits);
         y = y
             .saturating_add(height)
             .saturating_add(if index + 1 < rows.len() {
@@ -322,6 +322,7 @@ pub(super) fn render_agent_row(
     buffer: &mut Buffer,
     rect: Rect,
     row: &AgentRow,
+    shortcut_index: Option<usize>,
     config: &ClientShellConfig,
 ) {
     let palette = &config.palette;
@@ -356,6 +357,14 @@ pub(super) fn render_agent_row(
     for (index, tokens) in rows.iter().take(rect.height as usize).enumerate() {
         let indent = if index == 0 { 1 } else { 3 };
         let mut spans = vec![ratatui::text::Span::raw(" ".repeat(indent))];
+        let prefix = if index == 0 {
+            super::sidebar::shortcut_prefix(shortcut_index)
+        } else {
+            ""
+        };
+        if !prefix.is_empty() {
+            spans.push(ratatui::text::Span::styled(prefix, name_style));
+        }
         spans.extend(crate::ui::resolved_token_spans(
             tokens,
             icon,
@@ -364,7 +373,9 @@ pub(super) fn render_agent_row(
             secondary,
             secondary,
             palette,
-            rect.width.saturating_sub(indent as u16) as usize,
+            rect.width
+                .saturating_sub(indent as u16)
+                .saturating_sub(prefix.len() as u16) as usize,
         ));
         Paragraph::new(Line::from(spans)).style(row_style).render(
             Rect::new(rect.x, rect.y + index as u16, rect.width, 1),

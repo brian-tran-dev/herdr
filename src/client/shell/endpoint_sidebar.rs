@@ -271,6 +271,7 @@ pub(super) fn render_expanded(
         Workspace {
             endpoint: usize,
             entry: WorkspaceEntry,
+            shortcut_index: usize,
         },
     }
     let mut rows = Vec::new();
@@ -285,9 +286,11 @@ pub(super) fn render_expanded(
             rows.extend(
                 super::sidebar::workspace_entries(snapshot, collapsed_groups)
                     .into_iter()
-                    .map(|entry| Row::Workspace {
+                    .enumerate()
+                    .map(|(shortcut_index, entry)| Row::Workspace {
                         endpoint: endpoint_index,
                         entry,
+                        shortcut_index,
                     }),
             );
         }
@@ -305,7 +308,9 @@ pub(super) fn render_expanded(
         .iter()
         .map(|row| match row {
             Row::Endpoint(_) => 1,
-            Row::Workspace { endpoint, entry } => {
+            Row::Workspace {
+                endpoint, entry, ..
+            } => {
                 let endpoint = &state.endpoints[*endpoint];
                 let collapsed_groups = collapsed_groups_for_endpoint(state, &endpoint.endpoint_id)
                     .unwrap_or(&empty_collapsed_groups);
@@ -343,6 +348,7 @@ pub(super) fn render_expanded(
                 Some(Row::Workspace {
                     endpoint: next_endpoint,
                     entry,
+                    ..
                 }),
             ) if endpoint == next_endpoint => u16::from(!entry.indented) * config.spaces.row_gap,
             _ => 0,
@@ -352,7 +358,9 @@ pub(super) fn render_expanded(
     let reveal_focus = !body.is_empty() && std::mem::take(state.reveal_focused_workspace);
     if reveal_navigation || reveal_focus {
         let selected_row = rows.iter().position(|row| match row {
-            Row::Workspace { endpoint, entry } => {
+            Row::Workspace {
+                endpoint, entry, ..
+            } => {
                 let endpoint = &state.endpoints[*endpoint];
                 endpoint
                     .snapshot
@@ -432,7 +440,11 @@ pub(super) fn render_expanded(
                     .saturating_add(1)
                     .saturating_add(gaps.get(row_index).copied().unwrap_or(0));
             }
-            Row::Workspace { endpoint, entry } => {
+            Row::Workspace {
+                endpoint,
+                entry,
+                shortcut_index,
+            } => {
                 let endpoint = &state.endpoints[*endpoint];
                 let Some(snapshot) = endpoint.snapshot.as_deref() else {
                     continue;
@@ -447,7 +459,7 @@ pub(super) fn render_expanded(
                     workspace,
                     collapsed_groups,
                 );
-                let tokens = super::sidebar::workspace_rows(
+                let mut tokens = super::sidebar::workspace_rows(
                     workspace,
                     status,
                     entry.indented,
@@ -468,6 +480,7 @@ pub(super) fn render_expanded(
                 let selected = state.selected_workspace_id.is_some_and(|target| {
                     target.matches(&endpoint.endpoint_id, &workspace.workspace_id)
                 });
+                super::sidebar::prefix_workspace_rows(&mut tokens, *shortcut_index);
                 super::sidebar::render_workspace_rows(
                     buffer,
                     nested,

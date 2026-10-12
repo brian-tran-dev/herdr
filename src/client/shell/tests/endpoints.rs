@@ -1,5 +1,6 @@
 use super::*;
 
+mod sidebar_indices;
 #[path = "workspace_navigation.rs"]
 mod workspace_navigation;
 use crate::client::endpoint::{
@@ -546,6 +547,7 @@ fn machine_navigation_does_not_require_a_local_snapshot_or_surface() {
 #[test]
 fn sidebar_renders_local_and_saved_ssh_endpoints_with_status() {
     let (mut state, _) = state_with_remote();
+    state.sidebar_width = 30;
     let frame = state.compose(100, 28).expect("combined endpoint frame");
     let text = frame
         .cells
@@ -1016,6 +1018,8 @@ fn aggregate_agents_use_configured_rows_machine_token_and_status_colors() {
 
     let mut config = Config::default();
     config.ui.status_indicators = StatusIndicatorStyle::Symbols;
+    // Keep full labels visible while reserving four columns for shortcut badges.
+    config.ui.sidebar_width = 30;
     config.ui.sidebar.agents.rows = vec![vec![
         AgentSidebarToken::StateIcon,
         AgentSidebarToken::Machine,
@@ -1047,8 +1051,8 @@ fn aggregate_agents_use_configured_rows_machine_token_and_status_colors() {
         })
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(text.contains("○ Local · local agent"), "frame: {text}");
-    assert!(text.contains("× Build · remote agent"), "frame: {text}");
+    assert!(text.contains("[1] ○ Local · local agent"), "frame: {text}");
+    assert!(text.contains("[2] × Build · remote agent"), "frame: {text}");
     assert!(text.contains("grouped"), "frame: {text}");
     let toggle = state.hits.agent_sort_toggle;
     assert!(!toggle.is_empty());
@@ -1145,6 +1149,7 @@ fn current_workspace_or_blocked_keeps_foreign_attention_only() {
     use crate::config::AgentSidebarToken;
 
     let mut config = Config::default();
+    config.ui.sidebar_width = 30;
     config.ui.sidebar.agents.rows =
         vec![vec![AgentSidebarToken::Machine, AgentSidebarToken::Agent]];
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
@@ -1357,6 +1362,7 @@ fn selected_custom_sort_orders_rendering_and_indexed_navigation() {
     use crate::config::AgentSidebarToken;
 
     let mut config = Config::default();
+    config.ui.sidebar_width = 30;
     config.ui.agent_panel_sort = crate::config::AgentPanelSortConfig::Priority;
     config.ui.sidebar.agents.rows =
         vec![vec![AgentSidebarToken::Machine, AgentSidebarToken::Agent]];
@@ -1973,6 +1979,7 @@ fn disconnected_active_endpoint_freezes_surface_and_marks_cached_ui_stale() {
     state.pending_integration_installs = 2;
 
     state.mark_endpoint_disconnected(&endpoint_id);
+    state.sidebar_width = 30;
     let frame = state.compose(100, 28).expect("frozen endpoint frame");
     let text = frame
         .cells

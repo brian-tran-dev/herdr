@@ -4,6 +4,16 @@ use ratatui::{
     widgets::{Paragraph, Widget},
 };
 
+pub(in crate::client::shell) fn shortcut_prefix(index: Option<usize>) -> &'static str {
+    const PREFIXES: [&str; 9] = [
+        "[1] ", "[2] ", "[3] ", "[4] ", "[5] ", "[6] ", "[7] ", "[8] ", "[9] ",
+    ];
+    index
+        .and_then(|index| PREFIXES.get(index))
+        .copied()
+        .unwrap_or("[x] ")
+}
+
 fn workspace_selection_background(palette: &Palette) -> ratatui::style::Color {
     if palette.selection_bg == ratatui::style::Color::Reset {
         palette.active_row_bg
@@ -304,7 +314,7 @@ pub(crate) fn render_sidebar(
             continue;
         };
         let status = displayed_workspace_status(snapshot, workspace, state.collapsed_groups);
-        let rows = workspace_rows(workspace, status, entry.indented, &config.spaces);
+        let mut rows = workspace_rows(workspace, status, entry.indented, &config.spaces);
         let row_height = (rows.len().max(1).min(u16::MAX as usize) as u16).min(body.height);
         if y.saturating_add(row_height) > body.bottom() {
             break;
@@ -321,6 +331,7 @@ pub(crate) fn render_sidebar(
         } else if workspace.focused {
             buffer.set_style(rect, Style::default().bg(palette.active_row_bg));
         }
+        prefix_workspace_rows(&mut rows, entry_position);
         render_workspace_rows(
             buffer,
             rect,
@@ -650,6 +661,21 @@ pub(in crate::client::shell) fn workspace_rows(
             suppress_git_details: indented,
         },
     )
+}
+
+pub(in crate::client::shell) fn prefix_workspace_rows(
+    rows: &mut [Vec<crate::ui::ResolvedToken>],
+    shortcut_index: usize,
+) {
+    // Decorate only these client-owned display tokens, after style rules have
+    // matched the original name. Height measurement and snapshots stay unchanged.
+    for row in rows {
+        for token in row {
+            if let crate::ui::ResolvedTokenKind::Workspace(label) = &mut token.kind {
+                label.insert_str(0, shortcut_prefix(Some(shortcut_index)));
+            }
+        }
+    }
 }
 
 pub(in crate::client::shell) fn render_workspace_rows(
