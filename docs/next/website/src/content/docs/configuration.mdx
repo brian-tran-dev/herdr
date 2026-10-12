@@ -315,6 +315,8 @@ The sidebar is the main Herdr dashboard. Search `ui.` in the [Config reference](
 
 Set `tab_bar_position = "bottom"` under `[ui]` to place the desktop tab row below the terminal panes. Prefix, Navigate, Copy, and Resize mode bars temporarily replace the bottom tab row while active. The default is `"top"`.
 
+On the `khoa/customize` client, desktop tabs display their one-based position and name as ` 1: tab name `. The selected tab uses ` (1: tab name) `. Zoomed tabs append `[Z]`: ` 1: tab name [Z] ` when unselected, or ` (1: tab name)[Z] ` when selected. These are display decorations only; tab names, public IDs and session state remain unchanged. The right-hand native zoom badge is padded as ` ZOOM `, including both spaces in its highlighted background.
+
 Configure an ordered tmux-style status area at the right edge of the tab row:
 
 ```toml

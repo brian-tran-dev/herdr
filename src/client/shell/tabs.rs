@@ -23,9 +23,10 @@ pub(crate) fn render_tab_bar(
         .collect::<Vec<_>>();
     let desired_widths = tabs
         .iter()
-        .map(|tab| {
-            let label = tab_label(tab);
-            display_width(&label).saturating_add(4).max(MIN_TAB_WIDTH)
+        .enumerate()
+        .map(|(index, tab)| {
+            let label = tab_label(index, tab);
+            display_width(&label).max(MIN_TAB_WIDTH)
         })
         .collect::<Vec<_>>();
     let content = tab_bar_content_area(snapshot, area);
@@ -92,7 +93,7 @@ pub(crate) fn render_tab_bar(
     let mut first_visible = None;
     let mut last_visible = None;
     for (index, tab) in tabs.iter().enumerate().skip(*tab_scroll) {
-        let name = tab_label(tab);
+        let name = tab_label(index, tab);
         let desired = desired_widths[index];
         let remaining = tab_right.saturating_sub(x);
         let width = desired.min(remaining);
@@ -225,7 +226,7 @@ pub(crate) fn render_tab_bar(
 
 pub(crate) fn tab_bar_status_width(snapshot: &ClientShellSnapshot) -> u16 {
     let content = snapshot.tab_bar_right.iter().fold(0u16, |width, segment| {
-        width.saturating_add(display_width(&segment.text))
+        width.saturating_add(display_width(tab_status_text(segment)))
     });
     let separators = snapshot.tab_bar_right.len().saturating_sub(1);
     content.saturating_add(
@@ -277,7 +278,8 @@ fn render_tab_bar_status(
             );
             x = x.saturating_add(separator_width);
         }
-        let width = display_width(&segment.text);
+        let text = tab_status_text(segment);
+        let width = display_width(text);
         let style = if segment.accent {
             Style::default()
                 .fg(panel_contrast_fg(palette))
@@ -286,7 +288,7 @@ fn render_tab_bar_status(
         } else {
             Style::default().fg(palette.overlay1).bg(palette.panel_bg)
         };
-        put_text(buffer, x, area.y, width, &segment.text, style);
+        put_text(buffer, x, area.y, width, text, style);
         x = x.saturating_add(width);
     }
 }
@@ -371,17 +373,111 @@ fn max_tab_scroll(widths: &[u16], available: u16) -> usize {
     start
 }
 
-fn tab_label(tab: &ClientShellTab) -> String {
-    if tab.zoomed {
-        format!("{} Z", tab.label)
+fn tab_label(index: usize, tab: &ClientShellTab) -> String {
+    // Position is presentation-only: do not use the stable public tab number,
+    // which can differ from its one-based position after closing/moving tabs.
+    let number = index + 1;
+    if tab.focused {
+        let zoom = if tab.zoomed { "[Z]" } else { "" };
+        format!(" ({number}: {}){zoom} ", tab.label)
     } else {
-        tab.label.clone()
+        let zoom = if tab.zoomed { " [Z]" } else { "" };
+        format!(" {number}: {}{zoom} ", tab.label)
+    }
+}
+
+fn tab_status_text(segment: &crate::protocol::ClientShellTabStatusSegment) -> &str {
+    // Pad only the native zoom badge, borrowing a static string so width and
+    // render passes do not allocate or modify the server's snapshot.
+    if segment.accent && segment.text == "ZOOM" {
+        " ZOOM "
+    } else {
+        &segment.text
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::max_tab_scroll;
+    use super::*;
+
+    #[test]
+    fn tab_labels_format_focus_zoom_and_one_based_position() {
+        let mut tab = super::super::tests::snapshot().tabs.remove(0);
+        tab.label = "tab name".into();
+        tab.number = 47;
+        for (focused, zoomed, expected) in [
+            (false, false, " 1: tab name "),
+            (true, false, " (1: tab name) "),
+            (false, true, " 1: tab name [Z] "),
+            (true, true, " (1: tab name)[Z] "),
+        ] {
+            tab.focused = focused;
+            tab.zoomed = zoomed;
+            assert_eq!(tab_label(0, &tab), expected);
+            assert_eq!(tab.label, "tab name", "display must not rename the tab");
+            assert_eq!(tab.number, 47, "display must not renumber public IDs");
+        }
+        tab.label = "λ: 機能".into();
+        assert_eq!(tab_label(8, &tab), " (9: λ: 機能)[Z] ");
+    }
+
+    #[test]
+    fn formatted_tab_hitbox_includes_exact_outer_padding() {
+        let mut snapshot = super::super::tests::snapshot();
+        snapshot.tabs[0].label = "dev".into();
+        snapshot.tabs[0].custom_label = true;
+        snapshot.tabs[0].zoomed = true;
+        let config = ClientShellConfig::from_config(&Config::default());
+        let area = Rect::new(0, 0, 100, 1);
+        let mut buffer = Buffer::empty(area);
+        let mut hits = ShellHitMap::default();
+        render_tab_bar(
+            &mut buffer,
+            area,
+            &snapshot,
+            &config,
+            &mut 0,
+            &mut true,
+            None,
+            &mut hits,
+        );
+        let (rect, id) = &hits.tabs[0];
+        let text: String = (rect.x..rect.right())
+            .map(|x| buffer[(x, rect.y)].symbol())
+            .collect();
+        assert_eq!(text, " (1: dev)[Z] ");
+        assert_eq!(rect.width, display_width(&text));
+        assert_eq!(id, "tab_1");
+    }
+
+    #[test]
+    fn zoom_status_padding_is_measured_and_rendered_only_for_native_badge() {
+        let mut snapshot = super::super::tests::snapshot();
+        snapshot.tab_bar_right = vec![
+            crate::protocol::ClientShellTabStatusSegment {
+                text: "ZOOM".into(),
+                accent: true,
+            },
+            crate::protocol::ClientShellTabStatusSegment {
+                text: "host".into(),
+                accent: false,
+            },
+        ];
+        assert_eq!(tab_bar_status_width(&snapshot), 11);
+        let area = Rect::new(0, 0, 100, 1);
+        let mut buffer = Buffer::empty(area);
+        render_tab_bar_status(&mut buffer, area, &snapshot, &Palette::terminal());
+        let text: String = (89..100).map(|x| buffer[(x, 0)].symbol()).collect();
+        assert_eq!(text, " ZOOM  host");
+        assert_eq!(snapshot.tab_bar_right[0].text, "ZOOM");
+        snapshot.tab_bar_right[0].accent = false;
+        assert_eq!(tab_status_text(&snapshot.tab_bar_right[0]), "ZOOM");
+        assert_eq!(tab_bar_status_width(&snapshot), 9);
+        snapshot.tab_bar_right.remove(0);
+        assert_eq!(tab_bar_status_width(&snapshot), 4);
+        snapshot.tab_bar_right.clear();
+        assert_eq!(tab_bar_status_width(&snapshot), 0);
+    }
 
     #[test]
     fn trailing_scroll_limit_accounts_for_full_widths_and_separators() {
