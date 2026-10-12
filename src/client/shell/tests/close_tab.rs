@@ -79,6 +79,7 @@ fn last_tab_close_waits_for_keyboard_or_mouse_confirmation() {
         let frame = state.compose(106, 24).unwrap();
         let text = frame_rows(&frame).join("\n");
         assert!(text.contains("Close workspace?"));
+        assert!(text.contains("1: client-shell / 1: 1"));
         assert!(text.contains("1 pane"));
         let accepted = if menu {
             let primary = state.hits.overlay_primary;
@@ -143,7 +144,7 @@ fn any_tab_close_waits_for_keyboard_or_mouse_confirmation_and_counts_only_its_pa
         assert_no_close(&request_close(&mut state, menu));
         let text = frame_rows(&state.compose(106, 24).unwrap()).join("\n");
         assert!(text.contains("Close tab?"));
-        assert!(text.contains("client-shell / build"));
+        assert!(text.contains("1: client-shell / 1: build"));
         assert!(text.contains("2 panes"));
         assert!(!text.contains("Close workspace?"));
         assert!(!text.contains("3 panes"));
@@ -352,4 +353,90 @@ fn group_tab_confirmation_does_not_close_newly_created_tabs() {
     projected.tabs.push(new_tab);
     state.set_snapshot(Box::new(projected));
     assert_tab_close(&state.handle_input_bytes(b"\r"));
+}
+
+#[test]
+fn confirmation_indices_use_workspace_and_local_tab_positions_not_public_numbers() {
+    for (extra_workspaces, other_local_tabs) in [(1, 2), (10, 10)] {
+        let mut state = close_state(true, other_local_tabs + 1);
+        let mut projected = state.snapshot.as_deref().unwrap().clone();
+        projected.workspaces[0].number = 47;
+        projected.tabs[0].number = 71;
+        projected.tabs[0].label = "build".into();
+        let workspace = projected.workspaces[0].clone();
+        for index in 0..extra_workspaces {
+            projected.workspaces.insert(
+                index,
+                ClientShellWorkspace {
+                    workspace_id: format!("other_ws_{index}"),
+                    focused: false,
+                    number: 90 + index,
+                    ..workspace.clone()
+                },
+            );
+        }
+        let target = projected.tabs.remove(0);
+        let unrelated = ClientShellTab {
+            tab_id: "unrelated_tab".into(),
+            workspace_id: "other_ws_0".into(),
+            focused: false,
+            ..target.clone()
+        };
+        projected.tabs.insert(0, unrelated);
+        projected.tabs.push(target);
+        state.set_snapshot(Box::new(projected.clone()));
+        assert_no_close(&request_close(&mut state, false));
+        let Some(ClientShellOverlay::ConfirmClose(confirm)) = state.overlay.as_ref() else {
+            panic!("tab confirmation");
+        };
+        assert_eq!(
+            confirm.detail,
+            format!(
+                "{}: client-shell / {}: build — 1 pane",
+                extra_workspaces + 1,
+                other_local_tabs + 1
+            )
+        );
+        assert_tab_close(&state.handle_input_bytes(b"\r"));
+        assert_eq!(
+            state.snapshot.as_deref().unwrap().workspaces,
+            projected.workspaces
+        );
+        assert_eq!(state.snapshot.as_deref().unwrap().tabs, projected.tabs);
+    }
+}
+
+#[test]
+fn workspace_confirmation_indices_follow_grouped_and_collapsed_sidebar_order() {
+    let mut state = close_state(true, 1);
+    let mut projected = state.snapshot.as_deref().unwrap().clone();
+    let mut parent = projected.workspaces[0].clone();
+    parent.workspace_id = "parent".into();
+    parent.focused = false;
+    parent.worktree = Some(ClientShellWorktree {
+        key: "repo".into(),
+        label: "repo".into(),
+        is_linked_worktree: false,
+    });
+    let mut child = parent.clone();
+    child.workspace_id = "child".into();
+    child.worktree.as_mut().unwrap().is_linked_worktree = true;
+    projected.workspaces.insert(0, parent);
+    projected.workspaces.push(child);
+    state.set_snapshot(Box::new(projected));
+    for (collapsed, expected_index) in [(false, 3), (true, 2)] {
+        if collapsed {
+            state.collapsed_groups.insert("repo".into());
+        }
+        state.open_confirm_close_overlay("ws_1".into());
+        let Some(ClientShellOverlay::ConfirmClose(confirm)) = state.overlay.as_ref() else {
+            panic!("workspace confirmation");
+        };
+        assert_eq!(confirm.title, "Close workspace?");
+        assert_eq!(
+            confirm.detail,
+            format!("{expected_index}: client-shell — 1 pane")
+        );
+        assert!(confirm.tab_target.is_none());
+    }
 }

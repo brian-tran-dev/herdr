@@ -1069,10 +1069,11 @@ impl ClientShellState {
         let Some(snapshot) = self.snapshot.as_deref() else {
             return false;
         };
-        let Some(workspace) = snapshot
+        let Some((workspace_position, workspace)) = snapshot
             .workspaces
             .iter()
-            .find(|workspace| workspace.workspace_id == workspace_id)
+            .enumerate()
+            .find(|(_, workspace)| workspace.workspace_id == workspace_id)
         else {
             return false;
         };
@@ -1140,10 +1141,38 @@ impl ClientShellState {
                 })
                 .sum::<usize>()
         };
-        let subject = tab.map_or_else(
-            || workspace.label.clone(),
-            |tab| format!("{} / {}", workspace.label, tab.label),
+        let workspace_index = self
+            .navigation_workspace_entries(snapshot)
+            .iter()
+            .position(|entry| {
+                snapshot
+                    .workspaces
+                    .get(entry.index)
+                    .is_some_and(|workspace| workspace.workspace_id == workspace_id)
+            })
+            .unwrap_or(workspace_position);
+        let workspace_label = format!(
+            "{}{}",
+            super::sidebar::index_prefix(workspace_index),
+            workspace.label
         );
+        let subject = if let Some(tab) = tab {
+            let Some(tab_index) = snapshot
+                .tabs
+                .iter()
+                .filter(|candidate| candidate.workspace_id == workspace_id)
+                .position(|candidate| candidate.tab_id == tab.tab_id)
+            else {
+                return false;
+            };
+            format!(
+                "{workspace_label} / {}{}",
+                super::sidebar::index_prefix(tab_index),
+                tab.label
+            )
+        } else {
+            workspace_label
+        };
         let tab_target = if let (Some(tab_id), Some(scope)) = (tab_id, tab_scope) {
             let Some(workspace) = self.navigation_target(&self.active_endpoint_id, &workspace_id)
             else {
