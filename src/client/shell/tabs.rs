@@ -377,13 +377,8 @@ fn tab_label(index: usize, tab: &ClientShellTab) -> String {
     // Position is presentation-only: do not use the stable public tab number,
     // which can differ from its one-based position after closing/moving tabs.
     let number = index + 1;
-    if tab.focused {
-        let zoom = if tab.zoomed { "[Z]" } else { "" };
-        format!(" ({number}: {}){zoom} ", tab.label)
-    } else {
-        let zoom = if tab.zoomed { " [Z]" } else { "" };
-        format!(" {number}: {}{zoom} ", tab.label)
-    }
+    let zoom = if tab.zoomed { " [Z]" } else { "" };
+    format!(" {number}: {}{zoom} ", tab.label)
 }
 
 fn tab_status_text(segment: &crate::protocol::ClientShellTabStatusSegment) -> &str {
@@ -407,9 +402,9 @@ mod tests {
         tab.number = 47;
         for (focused, zoomed, expected) in [
             (false, false, " 1: tab name "),
-            (true, false, " (1: tab name) "),
+            (true, false, " 1: tab name "),
             (false, true, " 1: tab name [Z] "),
-            (true, true, " (1: tab name)[Z] "),
+            (true, true, " 1: tab name [Z] "),
         ] {
             tab.focused = focused;
             tab.zoomed = zoomed;
@@ -418,7 +413,7 @@ mod tests {
             assert_eq!(tab.number, 47, "display must not renumber public IDs");
         }
         tab.label = "λ: 機能".into();
-        assert_eq!(tab_label(8, &tab), " (9: λ: 機能)[Z] ");
+        assert_eq!(tab_label(8, &tab), " 9: λ: 機能 [Z] ");
     }
 
     #[test]
@@ -429,25 +424,34 @@ mod tests {
         snapshot.tabs[0].zoomed = true;
         let config = ClientShellConfig::from_config(&Config::default());
         let area = Rect::new(0, 0, 100, 1);
-        let mut buffer = Buffer::empty(area);
-        let mut hits = ShellHitMap::default();
-        render_tab_bar(
-            &mut buffer,
-            area,
-            &snapshot,
-            &config,
-            &mut 0,
-            &mut true,
-            None,
-            &mut hits,
-        );
-        let (rect, id) = &hits.tabs[0];
-        let text: String = (rect.x..rect.right())
-            .map(|x| buffer[(x, rect.y)].symbol())
-            .collect();
-        assert_eq!(text, " (1: dev)[Z] ");
-        assert_eq!(rect.width, display_width(&text));
-        assert_eq!(id, "tab_1");
+        for focused in [false, true] {
+            snapshot.tabs[0].focused = focused;
+            let mut buffer = Buffer::empty(area);
+            let mut hits = ShellHitMap::default();
+            render_tab_bar(
+                &mut buffer,
+                area,
+                &snapshot,
+                &config,
+                &mut 0,
+                &mut true,
+                None,
+                &mut hits,
+            );
+            let (rect, id) = &hits.tabs[0];
+            let text: String = (rect.x..rect.right())
+                .map(|x| buffer[(x, rect.y)].symbol())
+                .collect();
+            assert_eq!(text, " 1: dev [Z] ");
+            assert_eq!(rect.width, display_width(&text));
+            assert_eq!(id, "tab_1");
+            let expected_bg = if focused {
+                config.palette.accent
+            } else {
+                config.palette.surface0
+            };
+            assert_eq!(buffer[(rect.x, rect.y)].bg, expected_bg);
+        }
     }
 
     #[test]

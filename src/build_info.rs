@@ -20,6 +20,12 @@ pub fn version() -> String {
     }
 }
 
+/// Human-readable branding for this customized client, without changing the
+/// base version or server/client compatibility metadata.
+pub fn cli_version() -> String {
+    format!("v{}-khoa-customized", version())
+}
+
 pub fn is_preview() -> bool {
     channel() == "preview"
 }
@@ -40,5 +46,16 @@ mod tests {
     #[test]
     fn stable_version_defaults_to_cargo_version() {
         assert!(!super::version().is_empty());
+    }
+
+    #[test]
+    fn customized_cli_version_preserves_runtime_version() {
+        let runtime_version = super::version();
+        assert_eq!(
+            super::cli_version(),
+            format!("v{runtime_version}-khoa-customized")
+        );
+        assert_eq!(super::BASE_VERSION, env!("CARGO_PKG_VERSION"));
+        assert_eq!(super::version(), runtime_version);
     }
 }
