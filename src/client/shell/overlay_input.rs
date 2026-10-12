@@ -990,12 +990,9 @@ impl ClientShellState {
     pub(super) fn request_tab_close(&mut self, tab_id: String, outcome: &mut ClientShellInput) {
         let workspace_id = self.snapshot.as_deref().and_then(|snapshot| {
             let target = snapshot.tabs.iter().find(|tab| tab.tab_id == tab_id)?;
-            (self.config.confirm_close
-                && !snapshot
-                    .tabs
-                    .iter()
-                    .any(|tab| tab.workspace_id == target.workspace_id && tab.tab_id != tab_id))
-            .then(|| target.workspace_id.clone())
+            self.config
+                .confirm_close
+                .then(|| target.workspace_id.clone())
         });
         if let Some(workspace_id) = workspace_id {
             if self.open_close_confirmation(workspace_id, Some(tab_id.clone())) {
@@ -1029,9 +1026,32 @@ impl ClientShellState {
                 );
                 return;
             }
-            crate::api::schema::Method::TabClose(crate::api::schema::TabTarget {
-                tab_id: target.tab_id,
-            })
+            let Some(scope) = self.snapshot.as_deref().and_then(|snapshot| {
+                tab_close_scope(snapshot, &target.workspace.workspace_id, &target.tab_id)
+            }) else {
+                self.receive_endpoint_unavailable(
+                    "Close target changed; try closing the tab again".into(),
+                );
+                return;
+            };
+            if scope.broadens(&target.scope) {
+                // Another client can remove tabs or add worktrees while this
+                // dialog is open. Never silently expand the confirmed closure.
+                self.open_close_confirmation(confirm.workspace_id, Some(target.tab_id));
+                return;
+            }
+            if matches!(scope, ClientTabCloseScope::WorktreeGroup(_)) {
+                crate::api::schema::Method::WorkspaceClose(
+                    crate::api::schema::WorkspaceCloseParams {
+                        workspace_id: target.workspace.workspace_id,
+                        close_group: true,
+                    },
+                )
+            } else {
+                crate::api::schema::Method::TabClose(crate::api::schema::TabTarget {
+                    tab_id: target.tab_id,
+                })
+            }
         } else {
             crate::api::schema::Method::WorkspaceClose(crate::api::schema::WorkspaceCloseParams {
                 workspace_id: confirm.workspace_id,
@@ -1056,10 +1076,33 @@ impl ClientShellState {
         else {
             return false;
         };
+        let tab = match tab_id.as_deref() {
+            Some(tab_id) => {
+                let Some(tab) = snapshot
+                    .tabs
+                    .iter()
+                    .find(|tab| tab.tab_id == tab_id && tab.workspace_id == workspace_id)
+                else {
+                    return false;
+                };
+                Some(tab)
+            }
+            None => None,
+        };
+        let tab_scope = match tab_id.as_deref() {
+            Some(tab_id) => {
+                let Some(scope) = tab_close_scope(snapshot, &workspace_id, tab_id) else {
+                    return false;
+                };
+                Some(scope)
+            }
+            None => None,
+        };
+        let closes_workspace = !matches!(tab_scope, Some(ClientTabCloseScope::Tab));
         let group_key = workspace
             .worktree
             .as_ref()
-            .filter(|worktree| !worktree.is_linked_worktree)
+            .filter(|worktree| closes_workspace && !worktree.is_linked_worktree)
             .map(|worktree| worktree.key.as_str());
         let group = group_key
             .map(|key| {
@@ -1076,29 +1119,44 @@ impl ClientShellState {
             })
             .unwrap_or_else(|| vec![workspace]);
         let closes_group = group.len() > 1;
-        // Keep parent-group tab closes on the existing server confirmation path.
-        if tab_id.is_some() && closes_group {
-            return false;
-        }
-        let tab_target = if let Some(tab_id) = tab_id {
+        let pane_count = if !closes_workspace {
+            snapshot
+                .panes
+                .iter()
+                .filter(|pane| {
+                    pane.workspace_id == workspace_id
+                        && Some(pane.tab_id.as_str()) == tab_id.as_deref()
+                })
+                .count()
+        } else {
+            group
+                .iter()
+                .map(|member| {
+                    snapshot
+                        .panes
+                        .iter()
+                        .filter(|pane| pane.workspace_id == member.workspace_id)
+                        .count()
+                })
+                .sum::<usize>()
+        };
+        let subject = tab.map_or_else(
+            || workspace.label.clone(),
+            |tab| format!("{} / {}", workspace.label, tab.label),
+        );
+        let tab_target = if let (Some(tab_id), Some(scope)) = (tab_id, tab_scope) {
             let Some(workspace) = self.navigation_target(&self.active_endpoint_id, &workspace_id)
             else {
                 return false;
             };
-            Some(ClientTabCloseConfirmation { tab_id, workspace })
+            Some(ClientTabCloseConfirmation {
+                tab_id,
+                workspace,
+                scope,
+            })
         } else {
             None
         };
-        let pane_count = group
-            .iter()
-            .map(|member| {
-                snapshot
-                    .panes
-                    .iter()
-                    .filter(|pane| pane.workspace_id == member.workspace_id)
-                    .count()
-            })
-            .sum::<usize>();
         let panes = if pane_count == 1 {
             "1 pane".to_owned()
         } else {
@@ -1115,12 +1173,58 @@ impl ClientShellState {
                 tab_target,
                 title: if closes_group {
                     "Close worktree group?".to_owned()
-                } else {
+                } else if closes_workspace {
                     "Close workspace?".to_owned()
+                } else {
+                    "Close tab?".to_owned()
                 },
-                detail: format!("{} — {scope}", workspace.label),
+                detail: format!("{subject} — {scope}"),
             },
         ));
         true
     }
+}
+
+// Called only for a close request or its confirmation, not per render/frame.
+fn tab_close_scope(
+    snapshot: &ClientShellSnapshot,
+    workspace_id: &str,
+    tab_id: &str,
+) -> Option<ClientTabCloseScope> {
+    let workspace = snapshot
+        .workspaces
+        .iter()
+        .find(|workspace| workspace.workspace_id == workspace_id)?;
+    snapshot
+        .tabs
+        .iter()
+        .find(|tab| tab.tab_id == tab_id && tab.workspace_id == workspace_id)?;
+    if snapshot
+        .tabs
+        .iter()
+        .any(|tab| tab.workspace_id == workspace_id && tab.tab_id != tab_id)
+    {
+        return Some(ClientTabCloseScope::Tab);
+    }
+    if let Some(worktree) = workspace
+        .worktree
+        .as_ref()
+        .filter(|worktree| !worktree.is_linked_worktree)
+    {
+        let members = snapshot
+            .workspaces
+            .iter()
+            .filter(|member| {
+                member
+                    .worktree
+                    .as_ref()
+                    .is_some_and(|candidate| candidate.key == worktree.key)
+            })
+            .map(|member| member.workspace_id.clone())
+            .collect::<Vec<_>>();
+        if members.len() > 1 {
+            return Some(ClientTabCloseScope::WorktreeGroup(members));
+        }
+    }
+    Some(ClientTabCloseScope::Workspace)
 }

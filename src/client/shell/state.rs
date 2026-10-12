@@ -566,6 +566,29 @@ pub(super) struct ClientContextMenuItem {
 pub(super) struct ClientTabCloseConfirmation {
     pub(super) tab_id: String,
     pub(super) workspace: WorkspaceNavigationTarget,
+    pub(super) scope: ClientTabCloseScope,
+}
+
+/// Client-only scope shown by a tab-close dialog; never changes the wire codec.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum ClientTabCloseScope {
+    Tab,
+    Workspace,
+    WorktreeGroup(Vec<String>),
+}
+
+impl ClientTabCloseScope {
+    pub(super) fn broadens(&self, previous: &Self) -> bool {
+        match (self, previous) {
+            (Self::Tab, _) => false,
+            (Self::Workspace, Self::Tab) => true,
+            (Self::Workspace, _) => false,
+            (Self::WorktreeGroup(current), Self::WorktreeGroup(previous)) => {
+                current.iter().any(|id| !previous.contains(id))
+            }
+            (Self::WorktreeGroup(_), _) => true,
+        }
+    }
 }
 
 #[derive(Debug)]

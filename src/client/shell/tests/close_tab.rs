@@ -92,34 +92,69 @@ fn last_tab_close_waits_for_keyboard_or_mouse_confirmation() {
 }
 
 #[test]
-fn last_tab_close_confirmation_can_be_cancelled() {
-    for mouse in [false, true] {
-        let mut state = close_state(true, 1);
-        assert_no_close(&request_close(&mut state, false));
-        assert!(matches!(
-            state.overlay,
-            Some(ClientShellOverlay::ConfirmClose(_))
-        ));
-        state.compose(106, 24).unwrap();
-        let cancelled = if mouse {
-            let cancel = state.hits.overlay_cancel;
-            click(&mut state, cancel)
-        } else {
-            state.handle_input_bytes(b"\x1b")
-        };
-        assert_no_close(&cancelled);
-        assert!(state.overlay.is_none());
+fn tab_close_confirmation_can_be_cancelled() {
+    for tabs in [1, 2] {
+        for mouse in [false, true] {
+            let mut state = close_state(true, tabs);
+            assert_no_close(&request_close(&mut state, false));
+            assert!(matches!(
+                state.overlay,
+                Some(ClientShellOverlay::ConfirmClose(_))
+            ));
+            state.compose(106, 24).unwrap();
+            let cancelled = if mouse {
+                let cancel = state.hits.overlay_cancel;
+                click(&mut state, cancel)
+            } else {
+                state.handle_input_bytes(b"\x1b")
+            };
+            assert_no_close(&cancelled);
+            assert!(state.overlay.is_none());
+        }
     }
 }
 
 #[test]
-fn tab_close_stays_immediate_with_confirmation_disabled_or_other_tabs() {
-    for (confirm, tabs) in [(false, 1), (false, 2), (true, 2)] {
+fn tab_close_stays_immediate_with_confirmation_disabled() {
+    for tabs in [1, 2] {
         for menu in [false, true] {
-            let mut state = close_state(confirm, tabs);
+            let mut state = close_state(false, tabs);
             assert_tab_close(&request_close(&mut state, menu));
             assert!(state.overlay.is_none());
         }
+    }
+}
+
+#[test]
+fn any_tab_close_waits_for_keyboard_or_mouse_confirmation_and_counts_only_its_panes() {
+    for menu in [false, true] {
+        let mut state = close_state(true, 2);
+        let mut projected = state.snapshot.as_deref().unwrap().clone();
+        projected.tabs[0].label = "build".into();
+        for (id, tab) in [("pane_2", "tab_1"), ("pane_3", "tab_2")] {
+            projected.panes.push(ClientShellPane {
+                pane_id: id.into(),
+                tab_id: tab.into(),
+                focused: false,
+                ..projected.panes[0].clone()
+            });
+        }
+        state.set_snapshot(Box::new(projected));
+        assert_no_close(&request_close(&mut state, menu));
+        let text = frame_rows(&state.compose(106, 24).unwrap()).join("\n");
+        assert!(text.contains("Close tab?"));
+        assert!(text.contains("client-shell / build"));
+        assert!(text.contains("2 panes"));
+        assert!(!text.contains("Close workspace?"));
+        assert!(!text.contains("3 panes"));
+        let accepted = if menu {
+            let confirm = state.hits.overlay_primary;
+            click(&mut state, confirm)
+        } else {
+            state.handle_input_bytes(b"\r")
+        };
+        assert_tab_close(&accepted);
+        assert!(state.overlay.is_none());
     }
 }
 
@@ -162,25 +197,27 @@ fn last_tab_confirmation_preserves_target_across_focus_changes_and_new_tabs() {
 
 #[test]
 fn last_tab_confirmation_rejects_missing_moved_or_reconnected_targets() {
-    for change in ["missing", "moved", "reconnected"] {
-        let mut state = close_state(true, 1);
-        assert_no_close(&request_close(&mut state, false));
-        assert!(matches!(
-            state.overlay,
-            Some(ClientShellOverlay::ConfirmClose(_))
-        ));
-        let mut projected = state.snapshot.as_deref().unwrap().clone();
-        match change {
-            "missing" => projected.tabs.clear(),
-            "moved" => projected.tabs[0].workspace_id = "different_workspace".into(),
-            "reconnected" => state.endpoints[0].snapshot_generation = Some(2),
-            _ => unreachable!(),
+    for tabs in [1, 2] {
+        for change in ["missing", "moved", "reconnected"] {
+            let mut state = close_state(true, tabs);
+            assert_no_close(&request_close(&mut state, false));
+            assert!(matches!(
+                state.overlay,
+                Some(ClientShellOverlay::ConfirmClose(_))
+            ));
+            let mut projected = state.snapshot.as_deref().unwrap().clone();
+            match change {
+                "missing" => projected.tabs.clear(),
+                "moved" => projected.tabs[0].workspace_id = "different_workspace".into(),
+                "reconnected" => state.endpoints[0].snapshot_generation = Some(2),
+                _ => unreachable!(),
+            }
+            if change != "reconnected" {
+                state.set_snapshot(Box::new(projected));
+            }
+            assert_no_close(&state.handle_input_bytes(b"\r"));
+            assert!(state.overlay.is_none());
         }
-        if change != "reconnected" {
-            state.set_snapshot(Box::new(projected));
-        }
-        assert_no_close(&state.handle_input_bytes(b"\r"));
-        assert!(state.overlay.is_none());
     }
 }
 
@@ -216,19 +253,7 @@ fn last_tab_close_preserves_parent_group_and_linked_workspace_scope() {
             ));
             assert_tab_close(&state.handle_input_bytes(b"\r"));
         } else {
-            assert_tab_close(&close);
-            assert!(state.overlay.is_none());
-            let [ClientShellAction::Endpoint { request, .. }] = close.actions.as_slice() else {
-                panic!("tab close request");
-            };
-            state.handle_endpoint_result(
-                "boot-1",
-                &request.id,
-                Err(ClientShellEndpointError {
-                    code: Some("confirmation_required".into()),
-                    message: "closing this tab would close a worktree group".into(),
-                }),
-            );
+            assert_no_close(&close);
             assert!(matches!(state.overlay.as_ref(),
                 Some(ClientShellOverlay::ConfirmClose(confirm)) if confirm.title == "Close worktree group?"));
             let accepted = state.handle_input_bytes(b"\r");
@@ -238,4 +263,93 @@ fn last_tab_close_preserves_parent_group_and_linked_workspace_scope() {
                         if params.workspace_id == "ws_1" && params.close_group)));
         }
     }
+}
+
+#[test]
+fn ordinary_parent_group_tab_close_confirms_only_the_tab() {
+    let mut state = close_state(true, 2);
+    let mut projected = state.snapshot.as_deref().unwrap().clone();
+    projected.workspaces[0].worktree = Some(ClientShellWorktree {
+        key: "repo".into(),
+        label: "repo".into(),
+        is_linked_worktree: false,
+    });
+    let mut child = projected.workspaces[0].clone();
+    child.workspace_id = "ws_2".into();
+    child.worktree.as_mut().unwrap().is_linked_worktree = true;
+    projected.workspaces.push(child);
+    state.set_snapshot(Box::new(projected));
+    assert_no_close(&request_close(&mut state, false));
+    assert!(
+        matches!(state.overlay.as_ref(), Some(ClientShellOverlay::ConfirmClose(confirm))
+        if confirm.title == "Close tab?")
+    );
+    assert_tab_close(&state.handle_input_bytes(b"\r"));
+}
+
+#[test]
+fn tab_becoming_last_requires_updated_workspace_confirmation() {
+    let mut state = close_state(true, 2);
+    assert_no_close(&request_close(&mut state, false));
+    let mut projected = state.snapshot.as_deref().unwrap().clone();
+    projected.tabs.retain(|tab| tab.tab_id == "tab_1");
+    state.set_snapshot(Box::new(projected));
+    assert_no_close(&state.handle_input_bytes(b"\r"));
+    assert!(
+        matches!(state.overlay.as_ref(), Some(ClientShellOverlay::ConfirmClose(confirm))
+        if confirm.title == "Close workspace?")
+    );
+    assert_tab_close(&state.handle_input_bytes(b"\r"));
+}
+
+#[test]
+fn expanding_worktree_group_requires_fresh_confirmation() {
+    let mut state = close_state(true, 1);
+    let mut projected = state.snapshot.as_deref().unwrap().clone();
+    projected.workspaces[0].worktree = Some(ClientShellWorktree {
+        key: "repo".into(),
+        label: "repo".into(),
+        is_linked_worktree: false,
+    });
+    let mut child = projected.workspaces[0].clone();
+    child.workspace_id = "ws_2".into();
+    child.focused = false;
+    child.worktree.as_mut().unwrap().is_linked_worktree = true;
+    projected.workspaces.push(child.clone());
+    state.set_snapshot(Box::new(projected.clone()));
+    assert_no_close(&request_close(&mut state, false));
+    child.workspace_id = "ws_3".into();
+    projected.workspaces.push(child);
+    state.set_snapshot(Box::new(projected));
+    assert_no_close(&state.handle_input_bytes(b"\r"));
+    assert!(
+        matches!(state.overlay.as_ref(), Some(ClientShellOverlay::ConfirmClose(confirm))
+        if confirm.title == "Close worktree group?" && confirm.detail.contains("3 workspaces"))
+    );
+    assert!(matches!(state.handle_input_bytes(b"\r").actions.as_slice(),
+        [ClientShellAction::Endpoint { request, .. }]
+            if matches!(&request.method, Method::WorkspaceClose(params)
+                if params.workspace_id == "ws_1" && params.close_group)));
+}
+
+#[test]
+fn group_tab_confirmation_does_not_close_newly_created_tabs() {
+    let mut state = close_state(true, 1);
+    let mut projected = state.snapshot.as_deref().unwrap().clone();
+    projected.workspaces[0].worktree = Some(ClientShellWorktree {
+        key: "repo".into(),
+        label: "repo".into(),
+        is_linked_worktree: false,
+    });
+    let mut child = projected.workspaces[0].clone();
+    child.workspace_id = "ws_2".into();
+    child.worktree.as_mut().unwrap().is_linked_worktree = true;
+    projected.workspaces.push(child);
+    state.set_snapshot(Box::new(projected.clone()));
+    assert_no_close(&request_close(&mut state, false));
+    let mut new_tab = projected.tabs[0].clone();
+    new_tab.tab_id = "new_tab".into();
+    projected.tabs.push(new_tab);
+    state.set_snapshot(Box::new(projected));
+    assert_tab_close(&state.handle_input_bytes(b"\r"));
 }
