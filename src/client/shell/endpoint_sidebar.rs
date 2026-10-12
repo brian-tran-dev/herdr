@@ -271,7 +271,7 @@ pub(super) fn render_expanded(
         Workspace {
             endpoint: usize,
             entry: WorkspaceEntry,
-            shortcut_index: usize,
+            display_index: usize,
         },
     }
     let mut rows = Vec::new();
@@ -287,10 +287,10 @@ pub(super) fn render_expanded(
                 super::sidebar::workspace_entries(snapshot, collapsed_groups)
                     .into_iter()
                     .enumerate()
-                    .map(|(shortcut_index, entry)| Row::Workspace {
+                    .map(|(display_index, entry)| Row::Workspace {
                         endpoint: endpoint_index,
                         entry,
-                        shortcut_index,
+                        display_index,
                     }),
             );
         }
@@ -443,7 +443,7 @@ pub(super) fn render_expanded(
             Row::Workspace {
                 endpoint,
                 entry,
-                shortcut_index,
+                display_index,
             } => {
                 let endpoint = &state.endpoints[*endpoint];
                 let Some(snapshot) = endpoint.snapshot.as_deref() else {
@@ -480,7 +480,7 @@ pub(super) fn render_expanded(
                 let selected = state.selected_workspace_id.is_some_and(|target| {
                     target.matches(&endpoint.endpoint_id, &workspace.workspace_id)
                 });
-                super::sidebar::prefix_workspace_rows(&mut tokens, *shortcut_index);
+                super::sidebar::prefix_workspace_rows(&mut tokens, *display_index);
                 super::sidebar::render_workspace_rows(
                     buffer,
                     nested,

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{borrow::Cow, collections::HashMap};
 
 use ratatui::{
     buffer::Buffer,
@@ -82,7 +82,7 @@ pub(super) fn render_agent_panel(
         |row| row.rows.len(),
         |buffer, rect, index, row, hits| {
             hits.agents.push((rect, row.pane_id.clone()));
-            render_agent_row(buffer, rect, row, Some(index), config);
+            render_agent_row(buffer, rect, row, index, config);
         },
     );
 }
@@ -322,7 +322,7 @@ pub(super) fn render_agent_row(
     buffer: &mut Buffer,
     rect: Rect,
     row: &AgentRow,
-    shortcut_index: Option<usize>,
+    display_index: usize,
     config: &ClientShellConfig,
 ) {
     let palette = &config.palette;
@@ -358,14 +358,11 @@ pub(super) fn render_agent_row(
         let indent = if index == 0 { 1 } else { 3 };
         let mut spans = vec![ratatui::text::Span::raw(" ".repeat(indent))];
         let prefix = if index == 0 {
-            super::sidebar::shortcut_prefix(shortcut_index)
+            super::sidebar::index_prefix(display_index)
         } else {
-            ""
+            Cow::Borrowed("")
         };
-        if !prefix.is_empty() {
-            spans.push(ratatui::text::Span::styled(prefix, name_style));
-        }
-        spans.extend(crate::ui::resolved_token_spans(
+        let mut token_spans = crate::ui::resolved_token_spans(
             tokens,
             icon,
             status_style,
@@ -376,7 +373,27 @@ pub(super) fn render_agent_row(
             rect.width
                 .saturating_sub(indent as u16)
                 .saturating_sub(prefix.len() as u16) as usize,
-        ));
+        );
+        if !prefix.is_empty() {
+            let badge_position = if matches!(
+                tokens.first().map(|token| &token.kind),
+                Some(crate::ui::ResolvedTokenKind::StateIcon)
+            ) {
+                // Keep the leading status icon and its separator ahead of the
+                // badge, including rows whose only visible token is the icon.
+                if token_spans.len() == 1 {
+                    token_spans.push(ratatui::text::Span::raw(" "));
+                }
+                token_spans.len().min(2)
+            } else {
+                0
+            };
+            token_spans.insert(
+                badge_position,
+                ratatui::text::Span::styled(prefix, name_style),
+            );
+        }
+        spans.extend(token_spans);
         Paragraph::new(Line::from(spans)).style(row_style).render(
             Rect::new(rect.x, rect.y + index as u16, rect.width, 1),
             buffer,

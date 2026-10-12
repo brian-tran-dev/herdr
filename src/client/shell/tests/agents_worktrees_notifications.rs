@@ -502,7 +502,7 @@ fn agent_sidebar_honors_priority_symbols_tokens_and_stable_hits() {
         })
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(text.contains("× needs input"), "frame: {text}");
+    assert!(text.contains("× 1: needs input"), "frame: {text}");
     assert!(text.contains("pi two"), "frame: {text}");
     assert!(text.contains("waiting for"), "frame: {text}");
     assert_eq!(

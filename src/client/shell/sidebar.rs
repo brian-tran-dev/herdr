@@ -1,17 +1,19 @@
+use std::borrow::Cow;
+
 use super::*;
 use ratatui::{
     text::Line,
     widgets::{Paragraph, Widget},
 };
 
-pub(in crate::client::shell) fn shortcut_prefix(index: Option<usize>) -> &'static str {
+pub(in crate::client::shell) fn index_prefix(index: usize) -> Cow<'static, str> {
     const PREFIXES: [&str; 9] = [
-        "[1] ", "[2] ", "[3] ", "[4] ", "[5] ", "[6] ", "[7] ", "[8] ", "[9] ",
+        "1: ", "2: ", "3: ", "4: ", "5: ", "6: ", "7: ", "8: ", "9: ",
     ];
-    index
-        .and_then(|index| PREFIXES.get(index))
-        .copied()
-        .unwrap_or("[x] ")
+    match PREFIXES.get(index) {
+        Some(prefix) => Cow::Borrowed(prefix),
+        None => Cow::Owned(format!("{}: ", index.saturating_add(1))),
+    }
 }
 
 fn workspace_selection_background(palette: &Palette) -> ratatui::style::Color {
@@ -665,14 +667,15 @@ pub(in crate::client::shell) fn workspace_rows(
 
 pub(in crate::client::shell) fn prefix_workspace_rows(
     rows: &mut [Vec<crate::ui::ResolvedToken>],
-    shortcut_index: usize,
+    display_index: usize,
 ) {
     // Decorate only these client-owned display tokens, after style rules have
     // matched the original name. Height measurement and snapshots stay unchanged.
+    let prefix = index_prefix(display_index);
     for row in rows {
         for token in row {
             if let crate::ui::ResolvedTokenKind::Workspace(label) = &mut token.kind {
-                label.insert_str(0, shortcut_prefix(Some(shortcut_index)));
+                label.insert_str(0, &prefix);
             }
         }
     }

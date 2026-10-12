@@ -71,14 +71,8 @@ pub(super) fn render_expanded(
         agent_scroll,
         hits,
         |row| row.agent.rows.len(),
-        |buffer, rect, _, row, hits| {
-            super::agent_sidebar::render_agent_row(
-                buffer,
-                rect,
-                &row.agent,
-                row.shortcut_index,
-                config,
-            );
+        |buffer, rect, index, row, hits| {
+            super::agent_sidebar::render_agent_row(buffer, rect, &row.agent, index, config);
             if row.stale {
                 buffer.set_style(
                     rect,
@@ -132,7 +126,6 @@ struct EndpointAgentRow {
     endpoint_id: ClientEndpointId,
     machine_label: String,
     stale: bool,
-    shortcut_index: Option<usize>,
     agent: super::agent_sidebar::AgentRow,
 }
 
@@ -163,7 +156,6 @@ fn agent_rows(
         .flatten()
         .collect::<HashMap<_, _>>();
 
-    let mut next_shortcut_index = 0;
     super::aggregate_navigation::aggregate_agent_rows(
         endpoints,
         active_endpoint_id,
@@ -171,15 +163,6 @@ fn agent_rows(
     )
     .into_iter()
     .filter_map(|row| {
-        // Number the same online targets used by FocusAgent; cached offline
-        // rows stay visible but must not shift another agent's shortcut badge.
-        let shortcut_index = if row.endpoint.stale() {
-            None
-        } else {
-            let index = next_shortcut_index;
-            next_shortcut_index += 1;
-            Some(index)
-        };
         let key = (row.endpoint.endpoint_id.clone(), row.agent.pane_id.clone());
         let mut agent = rendered_rows.remove(&key)?;
         agent.focused &= row.endpoint.endpoint_id == active_endpoint_id;
@@ -187,7 +170,6 @@ fn agent_rows(
             endpoint_id: row.endpoint.endpoint_id.clone(),
             machine_label: row.endpoint.label.to_owned(),
             stale: row.endpoint.stale(),
-            shortcut_index,
             agent,
         })
     })

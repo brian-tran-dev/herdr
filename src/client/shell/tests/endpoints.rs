@@ -1018,7 +1018,7 @@ fn aggregate_agents_use_configured_rows_machine_token_and_status_colors() {
 
     let mut config = Config::default();
     config.ui.status_indicators = StatusIndicatorStyle::Symbols;
-    // Keep full labels visible while reserving four columns for shortcut badges.
+    // Keep full labels visible while reserving columns for index prefixes.
     config.ui.sidebar_width = 30;
     config.ui.sidebar.agents.rows = vec![vec![
         AgentSidebarToken::StateIcon,
@@ -1051,8 +1051,8 @@ fn aggregate_agents_use_configured_rows_machine_token_and_status_colors() {
         })
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(text.contains("[1] ○ Local · local agent"), "frame: {text}");
-    assert!(text.contains("[2] × Build · remote agent"), "frame: {text}");
+    assert!(text.contains("○ 1: Local · local agent"), "frame: {text}");
+    assert!(text.contains("× 2: Build · remote agent"), "frame: {text}");
     assert!(text.contains("grouped"), "frame: {text}");
     let toggle = state.hits.agent_sort_toggle;
     assert!(!toggle.is_empty());
