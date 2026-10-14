@@ -15,6 +15,7 @@ pub(crate) enum ResolvedTokenKind {
     StateText(String),
     Machine(String),
     Workspace(String),
+    PrimaryPane(String),
     Tab(String),
     Pane(String),
     Agent(String),
@@ -30,6 +31,7 @@ impl ResolvedTokenKind {
             Self::StateText(value)
             | Self::Machine(value)
             | Self::Workspace(value)
+            | Self::PrimaryPane(value)
             | Self::Tab(value)
             | Self::Pane(value)
             | Self::Agent(value)
@@ -56,6 +58,7 @@ pub(crate) struct AgentTokenContext<'a> {
     pub(crate) machine: Option<&'a str>,
     pub(crate) workspace: &'a str,
     pub(crate) tab: Option<&'a str>,
+    pub(crate) primary_pane_name: Option<&'a str>,
     pub(crate) pane: Option<&'a str>,
     pub(crate) agent_label: Option<&'a str>,
     pub(crate) terminal_title: Option<&'a str>,
@@ -72,7 +75,19 @@ pub(crate) fn agent_rows(
     config
         .rows_for_agent(context.canonical_agent)
         .iter()
-        .filter_map(|row| {
+        .enumerate()
+        .filter_map(|(index, row)| {
+            // Only replace the primary workspace/tab pair. Explicit workspace,
+            // tab and pane tokens in other layouts retain their own meanings.
+            let primary_pane_name = context.primary_pane_name.filter(|_| {
+                index == 0
+                    && row
+                        .iter()
+                        .any(|token| matches!(token.parts().0, AgentSidebarToken::Workspace))
+                    && row
+                        .iter()
+                        .any(|token| matches!(token.parts().0, AgentSidebarToken::Tab))
+            });
             let resolved = row
                 .iter()
                 .filter_map(|configured| {
@@ -85,11 +100,13 @@ pub(crate) fn agent_rows(
                         AgentSidebarToken::Machine => context
                             .machine
                             .map(|value| ResolvedTokenKind::Machine(value.to_string())),
-                        AgentSidebarToken::Workspace => {
-                            Some(ResolvedTokenKind::Workspace(context.workspace.to_string()))
-                        }
+                        AgentSidebarToken::Workspace => Some(match primary_pane_name {
+                            Some(name) => ResolvedTokenKind::PrimaryPane(name.to_string()),
+                            None => ResolvedTokenKind::Workspace(context.workspace.to_string()),
+                        }),
                         AgentSidebarToken::Tab => context
                             .tab
+                            .filter(|_| primary_pane_name.is_none())
                             .map(|value| ResolvedTokenKind::Tab(value.to_string())),
                         AgentSidebarToken::Pane => context
                             .pane
@@ -221,6 +238,7 @@ mod tests {
             machine: None,
             workspace: &entry.workspace,
             tab: entry.tab.as_deref(),
+            primary_pane_name: None,
             pane: entry.pane.as_deref(),
             agent_label: entry.agent_label.as_deref(),
             terminal_title: entry.terminal_title.as_deref(),

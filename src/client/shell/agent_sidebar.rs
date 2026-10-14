@@ -264,14 +264,7 @@ pub(super) fn agent_row(
         .panes
         .iter()
         .find(|pane| pane.pane_id == agent.pane_id);
-    let tab_count = snapshot
-        .tabs
-        .iter()
-        .filter(|candidate| candidate.workspace_id == agent.workspace_id)
-        .count();
-    let tab_label = tab
-        .filter(|tab| tab_count > 1 || tab.custom_label)
-        .map(|tab| tab.label.as_str());
+    let tab_label = tab.map(|tab| tab.label.as_str());
     let agent_label = agent
         .display_agent
         .as_deref()
@@ -298,6 +291,9 @@ pub(super) fn agent_row(
             machine,
             workspace: &workspace.label,
             tab: tab_label,
+            primary_pane_name: pane
+                .and_then(|pane| pane.label.as_deref())
+                .filter(|name| !name.trim().is_empty()),
             pane: agent
                 .title
                 .as_deref()
@@ -420,5 +416,130 @@ fn sidebar_status_text(status: crate::api::schema::AgentStatus) -> &'static str 
         AgentStatus::Done => "done",
         AgentStatus::Working => "working",
         AgentStatus::Idle | AgentStatus::Unknown => "idle",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::api::schema::AgentStatus;
+    use crate::protocol::ClientShellAgent;
+
+    fn snapshot_with_agent() -> ClientShellSnapshot {
+        let mut snapshot = super::super::tests::snapshot();
+        snapshot.workspaces[0].label = "repo".into();
+        snapshot.tabs[0].label = "dev".into();
+        snapshot.agents.push(ClientShellAgent {
+            pane_id: "pane_1".into(),
+            workspace_id: "ws_1".into(),
+            tab_id: "tab_1".into(),
+            name: Some("assigned-agent-name".into()),
+            display_agent: Some("OpenCode".into()),
+            agent: Some("opencode".into()),
+            title: Some("reported-title".into()),
+            terminal_title: Some("terminal-title".into()),
+            terminal_title_stripped: Some("terminal-title".into()),
+            agent_status: AgentStatus::Working,
+            state_change_seq: 42,
+            state_labels: Vec::new(),
+            tokens: Vec::new(),
+            focused: true,
+        });
+        snapshot
+    }
+
+    fn rendered_lines(row: &AgentRow, config: &ClientShellConfig) -> Vec<String> {
+        let area = Rect::new(0, 0, 100, row.rows.len() as u16);
+        let mut buffer = Buffer::empty(area);
+        render_agent_row(&mut buffer, area, row, 0, config);
+        (0..area.height)
+            .map(|y| {
+                (0..area.width)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>()
+                    .trim()
+                    .to_owned()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn agent_primary_label_prefers_manual_pane_name_and_preserves_details() {
+        let mut snapshot = snapshot_with_agent();
+        snapshot.panes[0].label = Some("reviewer".into());
+        let original = snapshot.clone();
+        let config = ClientShellConfig::from_config(&Config::default());
+        let icon = status_icon(AgentStatus::Working, config.status_indicators);
+        for (machine, expected) in [
+            (None, format!("{icon} 1: reviewer")),
+            (Some("Build"), format!("{icon} 1: Build · reviewer")),
+        ] {
+            let row = agent_row(&snapshot, "pane_1", &config, machine).unwrap();
+            assert_eq!(rendered_lines(&row, &config), [expected, "OpenCode".into()]);
+            assert_eq!(row.pane_id, "pane_1");
+            assert_eq!(row.status, AgentStatus::Working);
+            assert!(row.focused);
+        }
+        assert_eq!(snapshot, original, "presentation must not rename anything");
+    }
+
+    #[test]
+    fn agent_primary_label_falls_back_for_missing_or_blank_pane_names() {
+        let config = ClientShellConfig::from_config(&Config::default());
+        let icon = status_icon(AgentStatus::Working, config.status_indicators);
+        for label in [None, Some(""), Some(" \t ")] {
+            for custom_label in [false, true] {
+                let mut snapshot = snapshot_with_agent();
+                snapshot.panes[0].label = label.map(str::to_owned);
+                snapshot.tabs[0].custom_label = custom_label;
+                let row = agent_row(&snapshot, "pane_1", &config, None).unwrap();
+                assert_eq!(
+                    rendered_lines(&row, &config),
+                    [format!("{icon} 1: repo · dev"), "OpenCode".into()]
+                );
+            }
+        }
+        let mut snapshot = snapshot_with_agent();
+        snapshot.panes.clear();
+        let row = agent_row(&snapshot, "pane_1", &config, None).unwrap();
+        assert_eq!(
+            rendered_lines(&row, &config)[0],
+            format!("{icon} 1: repo · dev")
+        );
+    }
+
+    #[test]
+    fn pane_first_primary_label_preserves_custom_rows_and_name_styles() {
+        let mut snapshot = snapshot_with_agent();
+        snapshot.panes[0].label = Some("reviewer".into());
+        let config: Config = toml::from_str(
+            r#"
+[ui.sidebar.agents]
+rows = [
+    ["state_icon", { token = "workspace", dim = false, rules = [{ equals = "reviewer", bold = false }] }, "tab"],
+    ["workspace", "tab"],
+    ["agent"],
+]
+"#,
+        )
+        .unwrap();
+        let config = ClientShellConfig::from_config(&config);
+        let row = agent_row(&snapshot, "pane_1", &config, None).unwrap();
+        let icon = status_icon(AgentStatus::Working, config.status_indicators);
+        assert_eq!(
+            rendered_lines(&row, &config),
+            [
+                format!("{icon} 1: reviewer"),
+                "repo · dev".into(),
+                "OpenCode".into()
+            ]
+        );
+        assert_eq!(row.rows[0][1].style.dim, Some(false));
+        assert_eq!(row.rows[0][1].style.bold, Some(false));
+
+        let mut config = config;
+        config.agents.rows = vec![vec![crate::config::AgentSidebarToken::Workspace]];
+        let row = agent_row(&snapshot, "pane_1", &config, None).unwrap();
+        assert_eq!(rendered_lines(&row, &config), ["1: repo"]);
     }
 }

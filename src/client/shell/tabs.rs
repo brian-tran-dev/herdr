@@ -377,7 +377,7 @@ fn tab_label(index: usize, tab: &ClientShellTab) -> String {
     // Position is presentation-only: do not use the stable public tab number,
     // which can differ from its one-based position after closing/moving tabs.
     let number = index + 1;
-    let zoom = if tab.zoomed { " [Z]" } else { "" };
+    let zoom = if tab.zoomed { " · Z" } else { "" };
     format!(" {number}: {}{zoom} ", tab.label)
 }
 
@@ -403,8 +403,8 @@ mod tests {
         for (focused, zoomed, expected) in [
             (false, false, " 1: tab name "),
             (true, false, " 1: tab name "),
-            (false, true, " 1: tab name [Z] "),
-            (true, true, " 1: tab name [Z] "),
+            (false, true, " 1: tab name · Z "),
+            (true, true, " 1: tab name · Z "),
         ] {
             tab.focused = focused;
             tab.zoomed = zoomed;
@@ -413,7 +413,7 @@ mod tests {
             assert_eq!(tab.number, 47, "display must not renumber public IDs");
         }
         tab.label = "λ: 機能".into();
-        assert_eq!(tab_label(8, &tab), " 9: λ: 機能 [Z] ");
+        assert_eq!(tab_label(8, &tab), " 9: λ: 機能 · Z ");
     }
 
     #[test]
@@ -442,7 +442,7 @@ mod tests {
             let text: String = (rect.x..rect.right())
                 .map(|x| buffer[(x, rect.y)].symbol())
                 .collect();
-            assert_eq!(text, " 1: dev [Z] ");
+            assert_eq!(text, " 1: dev · Z ");
             assert_eq!(rect.width, display_width(&text));
             assert_eq!(id, "tab_1");
             let expected_bg = if focused {
