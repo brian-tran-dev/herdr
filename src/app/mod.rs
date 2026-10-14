@@ -1446,9 +1446,11 @@ mod tests {
         config.theme.auto_switch = true;
         config.theme.custom = Some(crate::config::CustomThemeColors {
             accent: Some("#010203".to_string()),
+            zoom_border: Some("#A5B4FC".to_string()),
             text: Some("#040506".to_string()),
             light: Some(crate::config::ModeThemeColors {
                 accent: Some("#070809".to_string()),
+                zoom_border: Some("#131415".to_string()),
                 ..Default::default()
             }),
             dark: Some(crate::config::ModeThemeColors {
@@ -1473,6 +1475,19 @@ mod tests {
             ratatui::style::Color::Rgb(1, 2, 3)
         );
         assert_eq!(
+            app.state.palette.zoom_border_color(),
+            ratatui::style::Color::Rgb(165, 180, 252)
+        );
+        let client_runtime = client_theme_runtime_from_config(&config);
+        assert_eq!(
+            client_palette_for_appearance(
+                &client_runtime,
+                crate::terminal_theme::HostAppearance::Dark
+            )
+            .zoom_border_color(),
+            app.state.palette.zoom_border_color()
+        );
+        assert_eq!(
             app.state.palette.text,
             ratatui::style::Color::Rgb(10, 11, 12)
         );
@@ -1495,6 +1510,18 @@ mod tests {
             ratatui::style::Color::Rgb(7, 8, 9)
         );
         assert_eq!(app.state.palette.text, ratatui::style::Color::Rgb(4, 5, 6));
+        assert_eq!(
+            app.state.palette.zoom_border_color(),
+            ratatui::style::Color::Rgb(19, 20, 21)
+        );
+        assert_eq!(
+            client_palette_for_appearance(
+                &client_runtime,
+                crate::terminal_theme::HostAppearance::Light
+            )
+            .zoom_border_color(),
+            app.state.palette.zoom_border_color()
+        );
     }
 
     #[test]

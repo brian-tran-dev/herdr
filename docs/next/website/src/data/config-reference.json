@@ -65,6 +65,12 @@
           "description": "Override the accent color token on top of the base theme. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
         },
         {
+          "key": "theme.custom.zoom_border",
+          "type": "color",
+          "default": "unset",
+          "description": "Override zoomed pane borders, their titles, and the ZOOM badge background. Unset follows the effective theme accent, preserving each theme's original colors. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
+        },
+        {
           "key": "theme.custom.panel_bg",
           "type": "color",
           "default": "unset",
@@ -179,6 +185,12 @@
           "description": "Override the accent color token when auto_switch selects a light appearance. Applied after theme.custom. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
         },
         {
+          "key": "theme.custom.light.zoom_border",
+          "type": "color",
+          "default": "unset",
+          "description": "Override zoomed pane borders, their titles, and the ZOOM badge background for a light appearance. Unset inherits theme.custom.zoom_border, or follows the effective accent when no zoom override exists. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
+        },
+        {
           "key": "theme.custom.light.panel_bg",
           "type": "color",
           "default": "unset",
@@ -291,6 +303,12 @@
           "type": "color",
           "default": "unset",
           "description": "Override the accent color token when auto_switch selects a dark appearance. Applied after theme.custom. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
+        },
+        {
+          "key": "theme.custom.dark.zoom_border",
+          "type": "color",
+          "default": "unset",
+          "description": "Override zoomed pane borders, their titles, and the ZOOM badge background for a dark appearance. Unset inherits theme.custom.zoom_border, or follows the effective accent when no zoom override exists. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
         },
         {
           "key": "theme.custom.dark.panel_bg",

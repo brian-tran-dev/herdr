@@ -89,6 +89,8 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # selection_bg = "#313244"
 # panel_bg = "reset"
 # accent = "#f5c2e7"
+# Zoomed pane borders and the ZOOM badge background; omitted follows the theme accent.
+# zoom_border = "#A5B4FC"
 # red = "#ff6188"
 # green = "#a6e3a1"
 

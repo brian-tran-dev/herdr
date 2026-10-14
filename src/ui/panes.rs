@@ -421,7 +421,7 @@ pub(super) fn render_panes(
         }
     }
 
-    render_pane_borders(app, ws, pane_infos, split_borders, frame);
+    render_pane_borders(app, ws, target.tab_index, pane_infos, split_borders, frame);
 }
 
 pub(crate) fn popup_pane_rects(app: &AppState, area: Rect) -> Option<(Rect, Rect)> {
@@ -466,6 +466,7 @@ struct LineCell {
 fn render_pane_borders(
     app: &AppState,
     ws: &crate::workspace::Workspace,
+    tab_index: usize,
     pane_infos: &[PaneInfo],
     split_borders: &[crate::layout::SplitBorder],
     frame: &mut Frame,
@@ -474,6 +475,13 @@ fn render_pane_borders(
         return;
     }
 
+    // Resolve once for the rendered tab, not once per border cell or from the
+    // workspace's active tab: attached clients can render different tabs.
+    let focused_color = if ws.tabs.get(tab_index).is_some_and(|tab| tab.zoomed) {
+        app.palette.zoom_border_color()
+    } else {
+        app.palette.accent
+    };
     let mut cells = std::collections::HashMap::<(u16, u16), LineCell>::new();
     for info in pane_infos {
         add_pane_border_cells(&mut cells, info);
@@ -500,14 +508,14 @@ fn render_pane_borders(
         let cell = &mut buf[(x, y)];
         cell.set_symbol(symbol);
         let color = if focused {
-            app.palette.accent
+            focused_color
         } else {
             app.palette.overlay0
         };
         cell.set_style(Style::default().fg(color));
     }
 
-    render_pane_border_titles(app, ws, pane_infos, frame);
+    render_pane_border_titles(app, ws, pane_infos, focused_color, frame);
 }
 
 fn add_split_border_cells(
@@ -636,6 +644,7 @@ fn render_pane_border_titles(
     app: &AppState,
     ws: &crate::workspace::Workspace,
     pane_infos: &[PaneInfo],
+    focused_color: Color,
     frame: &mut Frame,
 ) {
     let buf = frame.buffer_mut();
@@ -667,7 +676,7 @@ fn render_pane_border_titles(
             continue;
         }
         let color = if info.is_focused {
-            app.palette.accent
+            focused_color
         } else {
             app.palette.overlay0
         };
@@ -737,7 +746,7 @@ fn automatic_selection_style(
     host_theme: crate::terminal_theme::TerminalTheme,
 ) -> Style {
     let bg = automatic_selection_bg(p, host_theme);
-    Style::reset().fg(selection_fg_for_bg(bg, p)).bg(bg)
+    Style::reset().fg(contrasting_fg_for_bg(bg, p)).bg(bg)
 }
 
 fn automatic_selection_bg(p: &Palette, host_theme: crate::terminal_theme::TerminalTheme) -> Color {
@@ -770,7 +779,7 @@ fn selection_palette_background(p: &Palette) -> Color {
     }
 }
 
-fn selection_fg_for_bg(bg: Color, p: &Palette) -> Color {
+pub(crate) fn contrasting_fg_for_bg(bg: Color, p: &Palette) -> Color {
     if let Color::Rgb(r, g, b) = bg {
         let luminance = relative_luminance((r, g, b));
         let black_contrast = (luminance + 0.05) / 0.05;
@@ -856,7 +865,103 @@ mod tests {
         split_borders: &[crate::layout::SplitBorder],
         frame: &mut Frame,
     ) {
-        render_pane_borders(app, ws, &app.view.pane_infos, split_borders, frame);
+        render_pane_borders(
+            app,
+            ws,
+            ws.active_tab_index(),
+            &app.view.pane_infos,
+            split_borders,
+            frame,
+        );
+    }
+
+    #[test]
+    fn zoomed_pane_border_and_title_follow_theme_and_restore_accent() {
+        let mut app = AppState::test_new();
+        app.palette.accent = Color::Rgb(167, 243, 208);
+        app.palette.zoom_border = Some(Color::Rgb(12, 34, 56));
+        app.pane_borders = PaneBordersConfig::Always;
+        let mut workspace = Workspace::test_new("zoom colors");
+        let root = workspace.tabs[0].root_pane;
+        workspace.test_split(ratatui::layout::Direction::Horizontal);
+        workspace.tabs[0].layout.focus_pane(root);
+        app.workspaces = vec![workspace];
+        app.active = Some(0);
+        app.ensure_test_terminals();
+        let terminal_id = app.workspaces[0].terminal_id(root).unwrap().clone();
+        app.terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .set_manual_label("reviewer".into());
+        let runtimes = TerminalRuntimeRegistry::new();
+        let area = Rect::new(0, 0, 40, 8);
+
+        for (zoomed, expected) in [
+            (false, app.palette.accent),
+            (true, Color::Rgb(12, 34, 56)),
+            (false, app.palette.accent),
+        ] {
+            app.workspaces[0].tabs[0].zoomed = zoomed;
+            let layout = crate::ui::compute_tab_surface_for(
+                &app,
+                &runtimes,
+                Some(crate::ui::TabSurfaceTarget {
+                    workspace_index: 0,
+                    tab_index: 0,
+                }),
+                area,
+                false,
+                Default::default(),
+            );
+            let (buffer, _, _, _) = crate::server::render_stream::render_tab_surface_virtual(
+                &app, &runtimes, layout, area,
+            );
+            assert_eq!(buffer[(0, 0)].symbol(), "┌");
+            assert_eq!(buffer[(0, 0)].fg, expected);
+            assert_eq!(buffer[(0, 1)].fg, expected);
+            assert_eq!(buffer[(2, 0)].symbol(), "r");
+            assert_eq!(buffer[(2, 0)].fg, expected);
+            assert!(buffer[(2, 0)].modifier.contains(Modifier::BOLD));
+            assert_eq!(app.palette.accent, Color::Rgb(167, 243, 208));
+        }
+    }
+
+    #[test]
+    fn zoomed_border_color_follows_rendered_tab_not_workspace_active_tab() {
+        let mut app = AppState::test_new();
+        app.palette.zoom_border = Some(Color::Rgb(165, 180, 252));
+        app.pane_borders = PaneBordersConfig::Always;
+        let mut workspace = Workspace::test_new("different client tabs");
+        let rendered_tab = workspace.test_add_tab(Some("rendered"));
+        assert_eq!(workspace.active_tab_index(), 0);
+        app.workspaces = vec![workspace];
+        app.active = Some(0);
+        let runtimes = TerminalRuntimeRegistry::new();
+        let area = Rect::new(0, 0, 40, 8);
+
+        for (active_zoomed, rendered_zoomed, expected) in [
+            (false, true, Color::Rgb(165, 180, 252)),
+            (true, false, app.palette.accent),
+        ] {
+            app.workspaces[0].tabs[0].zoomed = active_zoomed;
+            app.workspaces[0].tabs[rendered_tab].zoomed = rendered_zoomed;
+            let layout = crate::ui::compute_tab_surface_for(
+                &app,
+                &runtimes,
+                Some(crate::ui::TabSurfaceTarget {
+                    workspace_index: 0,
+                    tab_index: rendered_tab,
+                }),
+                area,
+                false,
+                Default::default(),
+            );
+            let (buffer, _, _, _) = crate::server::render_stream::render_tab_surface_virtual(
+                &app, &runtimes, layout, area,
+            );
+            assert_eq!(buffer[(0, 0)].symbol(), "┌");
+            assert_eq!(buffer[(0, 0)].fg, expected);
+        }
     }
 
     #[test]

@@ -280,7 +280,15 @@ fn render_tab_bar_status(
         }
         let text = tab_status_text(segment);
         let width = display_width(text);
-        let style = if segment.accent {
+        let style = if segment.accent && segment.text == "ZOOM" {
+            Style::default()
+                .fg(match palette.zoom_border {
+                    Some(color) => crate::ui::contrasting_fg_for_bg(color, palette),
+                    None => panel_contrast_fg(palette),
+                })
+                .bg(palette.zoom_border_color())
+                .add_modifier(Modifier::BOLD)
+        } else if segment.accent {
             Style::default()
                 .fg(panel_contrast_fg(palette))
                 .bg(palette.accent)
@@ -393,6 +401,7 @@ fn tab_status_text(segment: &crate::protocol::ClientShellTabStatusSegment) -> &s
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ratatui::style::Color;
 
     #[test]
     fn tab_labels_ignore_focus_and_zoom_and_use_one_based_position() {
@@ -469,17 +478,90 @@ mod tests {
         assert_eq!(tab_bar_status_width(&snapshot), 11);
         let area = Rect::new(0, 0, 100, 1);
         let mut buffer = Buffer::empty(area);
-        render_tab_bar_status(&mut buffer, area, &snapshot, &Palette::terminal());
+        let palette = Palette {
+            zoom_border: Some(Color::Rgb(165, 180, 252)),
+            ..Palette::terminal()
+        };
+        render_tab_bar_status(&mut buffer, area, &snapshot, &palette);
         let text: String = (89..100).map(|x| buffer[(x, 0)].symbol()).collect();
         assert_eq!(text, " ZOOM  host");
+        for x in 89..95 {
+            assert_eq!(buffer[(x, 0)].bg, Color::Rgb(165, 180, 252));
+            assert_eq!(buffer[(x, 0)].fg, Color::Rgb(0, 0, 0));
+            assert!(buffer[(x, 0)].modifier.contains(Modifier::BOLD));
+        }
+        assert_eq!(buffer[(95, 0)].bg, palette.panel_bg);
+        assert_eq!(buffer[(96, 0)].bg, palette.panel_bg);
+        assert_eq!(buffer[(96, 0)].fg, palette.overlay1);
         assert_eq!(snapshot.tab_bar_right[0].text, "ZOOM");
         snapshot.tab_bar_right[0].accent = false;
         assert_eq!(tab_status_text(&snapshot.tab_bar_right[0]), "ZOOM");
         assert_eq!(tab_bar_status_width(&snapshot), 9);
+        let mut buffer = Buffer::empty(area);
+        render_tab_bar_status(&mut buffer, area, &snapshot, &palette);
+        assert_eq!(buffer[(91, 0)].bg, palette.panel_bg);
+        assert_eq!(buffer[(91, 0)].fg, palette.overlay1);
         snapshot.tab_bar_right.remove(0);
         assert_eq!(tab_bar_status_width(&snapshot), 4);
         snapshot.tab_bar_right.clear();
         assert_eq!(tab_bar_status_width(&snapshot), 0);
+    }
+
+    #[test]
+    fn zoom_status_follows_theme_override_and_preserves_other_accent_segments() {
+        let mut snapshot = super::super::tests::snapshot();
+        snapshot.tab_bar_right = vec![
+            crate::protocol::ClientShellTabStatusSegment {
+                text: "ZOOM".into(),
+                accent: true,
+            },
+            crate::protocol::ClientShellTabStatusSegment {
+                text: "CUSTOM".into(),
+                accent: true,
+            },
+        ];
+        let area = Rect::new(0, 0, 100, 1);
+        for panel_bg in [Color::Reset, Color::Black, Color::White] {
+            for (zoom_border, expected_fg) in [
+                (Color::Rgb(165, 180, 252), Color::Rgb(0, 0, 0)),
+                (Color::Rgb(12, 34, 56), Color::Rgb(255, 255, 255)),
+            ] {
+                let palette = Palette {
+                    panel_bg,
+                    zoom_border: Some(zoom_border),
+                    ..Palette::terminal()
+                };
+                let mut buffer = Buffer::empty(area);
+                render_tab_bar_status(&mut buffer, area, &snapshot, &palette);
+                for x in 87..93 {
+                    assert_eq!(buffer[(x, 0)].bg, zoom_border);
+                    assert_eq!(buffer[(x, 0)].fg, expected_fg);
+                }
+                for x in 94..100 {
+                    assert_eq!(buffer[(x, 0)].bg, palette.accent);
+                    assert_eq!(buffer[(x, 0)].fg, panel_contrast_fg(&palette));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn zoom_status_without_override_keeps_each_themes_original_accent_style() {
+        let mut snapshot = super::super::tests::snapshot();
+        snapshot.tab_bar_right = vec![crate::protocol::ClientShellTabStatusSegment {
+            text: "ZOOM".into(),
+            accent: true,
+        }];
+        let area = Rect::new(0, 0, 100, 1);
+        for name in crate::config::THEME_NAMES {
+            let palette = Palette::from_name(name).unwrap();
+            let mut buffer = Buffer::empty(area);
+            render_tab_bar_status(&mut buffer, area, &snapshot, &palette);
+            for x in 94..100 {
+                assert_eq!(buffer[(x, 0)].bg, palette.accent, "theme: {name}");
+                assert_eq!(buffer[(x, 0)].fg, panel_contrast_fg(&palette));
+            }
+        }
     }
 
     #[test]

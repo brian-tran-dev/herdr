@@ -101,6 +101,8 @@ impl ThemeConfig {
 #[serde(default)]
 pub struct CustomThemeColors {
     pub accent: Option<String>,
+    /// Zoomed pane borders and zoom badge background. Unset follows the accent.
+    pub zoom_border: Option<String>,
     pub panel_bg: Option<String>,
     pub sidebar_bg: Option<String>,
     pub active_row_bg: Option<String>,
@@ -130,6 +132,8 @@ pub struct CustomThemeColors {
 #[serde(default)]
 pub struct ModeThemeColors {
     pub accent: Option<String>,
+    /// Override the zoom highlight for this appearance; unset inherits the shared override.
+    pub zoom_border: Option<String>,
     pub panel_bg: Option<String>,
     pub sidebar_bg: Option<String>,
     pub active_row_bg: Option<String>,
@@ -298,6 +302,7 @@ sidebar_bg = "#181825"
 active_row_bg = "#313244"
 selection_bg = "#45475a"
 accent = "#ff79c6"
+zoom_border = "#A5B4FC"
 red = "rgb(255, 85, 85)"
 "##;
         let config: Config = toml::from_str(toml).unwrap();
@@ -308,6 +313,7 @@ red = "rgb(255, 85, 85)"
         assert_eq!(custom.active_row_bg.as_deref(), Some("#313244"));
         assert_eq!(custom.selection_bg.as_deref(), Some("#45475a"));
         assert_eq!(custom.accent.as_deref(), Some("#ff79c6"));
+        assert_eq!(custom.zoom_border.as_deref(), Some("#A5B4FC"));
         assert_eq!(custom.red.as_deref(), Some("rgb(255, 85, 85)"));
         assert!(custom.green.is_none());
     }
@@ -317,26 +323,32 @@ red = "rgb(255, 85, 85)"
         let toml = r##"
 [theme.custom]
 accent = "#010203"
+zoom_border = "#101112"
 
 [theme.custom.light]
 accent = "#040506"
+zoom_border = "#131415"
 text = "#070809"
 selection_bg = "#101112"
 
 [theme.custom.dark]
 panel_bg = "#0a0b0c"
+zoom_border = "#161718"
 sidebar_bg = "#0d0e0f"
 active_row_bg = "#131415"
 "##;
         let config: Config = toml::from_str(toml).unwrap();
         let custom = config.theme.custom.as_ref().unwrap();
         assert_eq!(custom.accent.as_deref(), Some("#010203"));
+        assert_eq!(custom.zoom_border.as_deref(), Some("#101112"));
         let light = custom.light.as_ref().unwrap();
         assert_eq!(light.accent.as_deref(), Some("#040506"));
+        assert_eq!(light.zoom_border.as_deref(), Some("#131415"));
         assert_eq!(light.text.as_deref(), Some("#070809"));
         assert_eq!(light.selection_bg.as_deref(), Some("#101112"));
         let dark = custom.dark.as_ref().unwrap();
         assert_eq!(dark.panel_bg.as_deref(), Some("#0a0b0c"));
+        assert_eq!(dark.zoom_border.as_deref(), Some("#161718"));
         assert_eq!(dark.sidebar_bg.as_deref(), Some("#0d0e0f"));
         assert_eq!(dark.active_row_bg.as_deref(), Some("#131415"));
     }
