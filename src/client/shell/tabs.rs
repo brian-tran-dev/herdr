@@ -377,8 +377,7 @@ fn tab_label(index: usize, tab: &ClientShellTab) -> String {
     // Position is presentation-only: do not use the stable public tab number,
     // which can differ from its one-based position after closing/moving tabs.
     let number = index + 1;
-    let zoom = if tab.zoomed { " · Z" } else { "" };
-    format!(" {number}: {}{zoom} ", tab.label)
+    format!(" {number}: {} ", tab.label)
 }
 
 fn tab_status_text(segment: &crate::protocol::ClientShellTabStatusSegment) -> &str {
@@ -396,15 +395,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn tab_labels_format_focus_zoom_and_one_based_position() {
+    fn tab_labels_ignore_focus_and_zoom_and_use_one_based_position() {
         let mut tab = super::super::tests::snapshot().tabs.remove(0);
         tab.label = "tab name".into();
         tab.number = 47;
         for (focused, zoomed, expected) in [
             (false, false, " 1: tab name "),
             (true, false, " 1: tab name "),
-            (false, true, " 1: tab name · Z "),
-            (true, true, " 1: tab name · Z "),
+            (false, true, " 1: tab name "),
+            (true, true, " 1: tab name "),
         ] {
             tab.focused = focused;
             tab.zoomed = zoomed;
@@ -413,7 +412,7 @@ mod tests {
             assert_eq!(tab.number, 47, "display must not renumber public IDs");
         }
         tab.label = "λ: 機能".into();
-        assert_eq!(tab_label(8, &tab), " 9: λ: 機能 · Z ");
+        assert_eq!(tab_label(8, &tab), " 9: λ: 機能 ");
     }
 
     #[test]
@@ -421,11 +420,11 @@ mod tests {
         let mut snapshot = super::super::tests::snapshot();
         snapshot.tabs[0].label = "dev".into();
         snapshot.tabs[0].custom_label = true;
-        snapshot.tabs[0].zoomed = true;
         let config = ClientShellConfig::from_config(&Config::default());
         let area = Rect::new(0, 0, 100, 1);
-        for focused in [false, true] {
+        for (focused, zoomed) in [(false, false), (true, false), (false, true), (true, true)] {
             snapshot.tabs[0].focused = focused;
+            snapshot.tabs[0].zoomed = zoomed;
             let mut buffer = Buffer::empty(area);
             let mut hits = ShellHitMap::default();
             render_tab_bar(
@@ -442,7 +441,7 @@ mod tests {
             let text: String = (rect.x..rect.right())
                 .map(|x| buffer[(x, rect.y)].symbol())
                 .collect();
-            assert_eq!(text, " 1: dev · Z ");
+            assert_eq!(text, " 1: dev ");
             assert_eq!(rect.width, display_width(&text));
             assert_eq!(id, "tab_1");
             let expected_bg = if focused {
